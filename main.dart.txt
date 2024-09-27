@@ -1,0 +1,212 @@
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:photo_view/photo_view.dart';
+
+void main() {
+  runApp(ImageViewerApp());
+}
+
+class ImageViewerApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Image Viewer',
+      theme: ThemeData.dark(),
+      home: ImageGridScreen(),
+    );
+  }
+}
+
+class ImageGridScreen extends StatefulWidget {
+  @override
+  _ImageGridScreenState createState() => _ImageGridScreenState();
+}
+
+class _ImageGridScreenState extends State<ImageGridScreen> {
+  List<String> _imagePaths = [];
+  int? _bookmarkedIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadImages();
+    _loadBookmark();
+  }
+
+  // Load saved image paths from SharedPreferences
+  Future<void> _loadImages() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _imagePaths = prefs.getStringList('imagePaths') ?? [];
+    });
+  }
+
+  // Save the current image paths to SharedPreferences
+  Future<void> _saveImages() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('imagePaths', _imagePaths);
+  }
+
+  // Load the last bookmarked index from SharedPreferences
+  Future<void> _loadBookmark() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _bookmarkedIndex = prefs.getInt('bookmarkedIndex');
+    });
+  }
+
+  // Bookmark the current image index and save it
+  Future<void> _bookmarkImage(int index) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('bookmarkedIndex', index);
+    setState(() {
+      _bookmarkedIndex = index;
+    });
+  }
+
+  // Pick images using the image picker
+  Future<void> _pickImages() async {
+    final List<XFile>? selectedImages = await ImagePicker().pickMultiImage();
+    if (selectedImages != null) {
+      setState(() {
+        _imagePaths.addAll(selectedImages.map((xFile) => xFile.path));
+        _saveImages();  // Save the updated list of images
+      });
+    }
+  }
+
+  // Delete an image and update the storage
+  Future<void> _deleteImage(int index) async {
+    setState(() {
+      _imagePaths.removeAt(index);
+      if (_bookmarkedIndex == index) {
+        _bookmarkedIndex = null;  // Clear bookmark if the bookmarked image is deleted
+      } else if (_bookmarkedIndex != null && _bookmarkedIndex! > index) {
+        _bookmarkedIndex = _bookmarkedIndex! - 1;  // Adjust bookmark index if needed
+      }
+      _saveImages();  // Save the updated list of images
+    });
+  }
+
+  // Navigate to the full-screen image view
+  void _viewImage(BuildContext context, int index) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => FullScreenImageView(
+          imagePath: _imagePaths[index],
+          onBookmark: () => _bookmarkImage(index),
+          onDelete: () => _deleteImage(index),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Image Viewer'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.folder),
+            onPressed: _pickImages,
+          ),
+        ],
+      ),
+      body: _imagePaths.isEmpty
+          ? Center(child: Text('No images uploaded.'))
+          : GridView.builder(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                childAspectRatio: 1,
+              ),
+              itemCount: _imagePaths.length,
+              itemBuilder: (context, index) {
+                return GestureDetector(
+                  onTap: () => _viewImage(context, index),
+                  child: GridTile(
+                    child: Image.file(
+                      File(_imagePaths[index]),
+                      fit: BoxFit.cover,
+                    ),
+                    footer: GridTileBar(
+                      title: Text('${index + 1}'),  // Display serial number
+                      backgroundColor: Colors.black54,
+                      trailing: _bookmarkedIndex == index
+                          ? Icon(Icons.star, color: Colors.yellow)
+                          : null,  // Show bookmark icon if this image is bookmarked
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+class FullScreenImageView extends StatefulWidget {
+  final String imagePath;
+  final VoidCallback onBookmark;
+  final VoidCallback onDelete;
+
+  FullScreenImageView({
+    required this.imagePath,
+    required this.onBookmark,
+    required this.onDelete,
+  });
+
+  @override
+  _FullScreenImageViewState createState() => _FullScreenImageViewState();
+}
+
+class _FullScreenImageViewState extends State<FullScreenImageView> {
+  double _rotation = 0.0;  // Rotation angle
+  double _scale = 1.0;      // Zoom level
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: GestureDetector(
+          onScaleUpdate: (ScaleUpdateDetails details) {
+            setState(() {
+              _scale = details.scale;  // Update zoom level
+              _rotation = details.rotation;  // Update rotation angle
+            });
+          },
+          child: Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.identity()
+              ..scale(_scale)          // Apply zoom
+              ..rotateZ(_rotation),    // Apply rotation
+            child: PhotoView(
+              imageProvider: FileImage(File(widget.imagePath)),
+              minScale: PhotoViewComputedScale.contained,
+              maxScale: PhotoViewComputedScale.covered * 2,
+            ),
+          ),
+        ),
+      ),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FloatingActionButton(
+            onPressed: widget.onBookmark,
+            child: Icon(Icons.bookmark),
+          ),
+          SizedBox(height: 10),
+          FloatingActionButton(
+            onPressed: () {
+              widget.onDelete();
+              Navigator.of(context).pop();
+            },
+            child: Icon(Icons.delete),
+          ),
+        ],
+      ),
+    );
+  }
+}
