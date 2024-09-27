@@ -1,0 +1,7 @@
+tasks:
+  - init: |
+      # Install Flutter SDK
+      git clone https://github.com/flutter/flutter.git -b stable --depth 1 $HOME/flutter
+      echo 'export PATH="$PATH:$HOME/flutter/bin"' >> $HOME/.bashrc
+      source $HOME/.bashrc
+  - command: flutter doctor
